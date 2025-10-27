@@ -1,28 +1,23 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Ruleta Halloween (imagen que gira) – pantalla completa
-- Fondo fijo (PNG/JPG)
-- Ruleta PNG que rota (se aplica máscara circular para ocultar puntero dibujado en la imagen si lo tuviera)
-- Puntero fijo arriba
-- Animación con easing (desaceleración)
-- PC: barra ESPACIO  |  RPi: botón en GPIO 17 (pull-up)
+Ruleta Halloween – v4 patrones (6 secciones, sin PNGs)
+- Dulce = cálidos | Truco = fríos
+- Centro oscuro (sin blanco)
+- Sin triángulo selector; puntero conceptual arriba
+- PC: ESPACIO | RPi: GPIO 17
 """
 
-import math, random, time
-import pygame
+import math, random, time, pygame
 
-# ---------------- Config ----------------
+# ===== Config =====
 FULLSCREEN = True
 FPS = 60
+SS = 2  # 2 = nítido; en RPi 2 podés bajar a 1
 
-BACKGROUND_PATH = "fondo_halloween.png"  # tu fondo
-WHEEL_PATH      = "ruleta.png"           # ruleta PNG (transparente)
+BACKGROUND_PATH = "fondo_halloween.png"  # si existe, se usa
 
-# Tamaño de la ruleta respecto a la pantalla (0.0–1.0)
-WHEEL_SCALE = 0.85
-
-# Entrada física
+# Entrada física (se desactiva si no hay GPIO)
 BUTTON_GPIO = 17
 DEBOUNCE_MS = 200
 USE_GPIO = True
@@ -31,47 +26,137 @@ try:
 except Exception:
     USE_GPIO = False
 
-# Easing / animación
+# Animación
 SPIN_MIN_TURNS = 3.8
-SPIN_MAX_TURNS = 6.5
+SPIN_MAX_TURNS = 6.2
 SPIN_DURATION  = 3.8
 
-# 6 segmentos: alterna Dulce/Truco
-SEGMENT_LABELS = ["Dulce", "Truco", "Dulce", "Truco", "Dulce", "Truco"]
+# Geometría ruleta
 N_SEG = 6
-SEG_PER_RAD = (2 * math.pi) / N_SEG
+SEG_PER_RAD = 2 * math.pi / N_SEG
 
-TEXT_COLOR = (250, 250, 250)
+# Paleta
+TEXT = (250, 250, 250)
+UI_SHADOW = (0, 0, 0)
 
-# -------------- Utilidades --------------
+# Patrones de color:
+# Dulce (cálidos) y Truco (fríos), alternados
+WARM1 = (255, 120, 40)    # naranja
+WARM2 = (255, 196, 58)    # amarillo calabaza
+WARM3 = (255, 100, 150)   # fucsia candy
+COOL1 = (98,  82, 160)    # violeta
+COOL2 = (52,  140, 180)   # azul verdoso
+COOL3 = (70,  185, 120)   # verde lima
+
+SEGMENT_LABELS = ["Dulce", "Truco", "Dulce", "Truco", "Dulce", "Truco"]
+SEG_COLORS     = [WARM1,  COOL1,  WARM2,  COOL2,  WARM3,  COOL3]
+
+# ==== Utils ====
 def ease_out_cubic(t: float) -> float:
-    t -= 1.0
-    return t * t * t + 1.0
+    t -= 1.0; return t*t*t + 1.0
 
-def load_image_scaled(path, target_w=None, target_h=None, convert_alpha=True):
-    img = pygame.image.load(path)
-    img = img.convert_alpha() if convert_alpha else img.convert()
-    if target_w and target_h:
-        img = pygame.transform.smoothscale(img, (target_w, target_h))
-    return img
+def clamp(v, a, b): return max(a, min(b, v))
 
-def circular_mask(surface):
-    """Devuelve una versión de 'surface' recortada a un círculo máximo (para ocultar puntero embebido)."""
-    w, h = surface.get_size()
-    r = min(w, h) // 2
-    mask = pygame.Surface((w, h), pygame.SRCALPHA)
-    pygame.draw.circle(mask, (255, 255, 255, 255), (w // 2, h // 2), r-1)
-    # Multiplicamos alphas
-    out = surface.copy()
-    out.blit(mask, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
-    return out
+def arc_points(cx, cy, r, a0, a1, steps=72):
+    pts=[]
+    for i in range(steps+1):
+        t=i/steps; a=a0+(a1-a0)*t
+        pts.append((cx + r*math.cos(a), cy + r*math.sin(a)))
+    return pts
 
-# --------------- Entrada ----------------
+def wedge_polygon(cx, cy, r0, r1, a0, a1, steps=72):
+    return arc_points(cx,cy,r1,a0,a1,steps) + arc_points(cx,cy,r0,a1,a0,steps)
+
+def load_bg_scaled(w, h):
+    try:
+        raw = pygame.image.load(BACKGROUND_PATH).convert()
+        return pygame.transform.smoothscale(raw, (w, h))
+    except Exception:
+        # degradé simple fallback
+        s = pygame.Surface((w,h))
+        top, bot = (255,163,26), (248,122,13)
+        for y in range(h):
+            t = y/max(1,h-1)
+            col = (int(top[0]+(bot[0]-top[0])*t),
+                   int(top[1]+(bot[1]-top[1])*t),
+                   int(top[2]+(bot[2]-top[2])*t))
+            pygame.draw.line(s, col, (0,y), (w,y))
+        return s
+
+# ==== Iconos (procedurales y simples) ====
+def icon_candies(surf, cx, cy, r):
+    cols=[(255,99,132),(255,205,86),(54,162,235)]
+    for i,c in enumerate(cols):
+        x = int(cx + (i-1)*r*0.35)
+        y = int(cy + ((i%2)*2-1)*r*0.08)
+        pygame.draw.circle(surf, c, (x, y), int(r*0.14))
+        pygame.draw.polygon(surf, (235,235,235), [(x-int(r*0.22),y),
+                                                  (x-int(r*0.30),y-int(r*0.08)),
+                                                  (x-int(r*0.30),y+int(r*0.08))])
+        pygame.draw.polygon(surf, (235,235,235), [(x+int(r*0.22),y),
+                                                  (x+int(r*0.30),y-int(r*0.08)),
+                                                  (x+int(r*0.30),y+int(r*0.08))])
+
+def icon_pumpkin(surf, cx, cy, r):
+    orange=(255,140,0); face=(30,12,0); green=(40,140,40)
+    for k in range(-2,3):
+        pygame.draw.circle(surf, orange, (int(cx+k*r*0.18), int(cy)), int(r*0.7 - abs(k)*int(r*0.08)))
+    pygame.draw.rect(surf, green, (int(cx-r*0.12), int(cy-r*0.95), int(r*0.24), int(r*0.3)))
+    pygame.draw.polygon(surf, face, [(int(cx-r*0.28),int(cy-r*0.15)),(int(cx-r*0.08),int(cy-r*0.4)),(int(cx-0.0),int(cy-r*0.1))])
+    pygame.draw.polygon(surf, face, [(int(cx+r*0.28),int(cy-r*0.15)),(int(cx+r*0.08),int(cy-r*0.4)),(int(cx+0.0),int(cy-r*0.1))])
+    pygame.draw.polygon(surf, face, [(int(cx-r*0.25),int(cy+r*0.22)),(int(cx+r*0.25),int(cy+r*0.22)),(int(cx),int(cy+r*0.38))])
+
+def icon_potion(surf, cx, cy, r):
+    glass=(210,240,255); liquid=(255, 120, 190)  # rosa para “dulce”
+    pygame.draw.rect(surf, (160,110,70), (int(cx-r*0.12), int(cy-r*0.9), int(r*0.24), int(r*0.18)))
+    pygame.draw.rect(surf, glass, (int(cx-r*0.14), int(cy-r*0.7), int(r*0.28), int(r*0.22)), border_radius=6)
+    pygame.draw.ellipse(surf, glass, (int(cx-r*0.8), int(cy-r*0.2), int(r*1.6), int(r*1.1)))
+    pygame.draw.ellipse(surf, liquid, (int(cx-r*0.72), int(cy+r*0.12), int(r*1.44), int(r*0.58)))
+
+def icon_ghost(surf, cx, cy, r):
+    white=(235,235,245); eye=(35,35,45)
+    body=pygame.Rect(0,0,int(r*1.2), int(r*1.35)); body.center=(int(cx),int(cy))
+    pygame.draw.ellipse(surf, white, body)
+    for i in range(-2,3):
+        pygame.draw.circle(surf, white, (int(cx+i*r*0.22), int(cy+r*0.60)), int(r*0.22))
+    pygame.draw.circle(surf, eye, (int(cx-r*0.2), int(cy-r*0.05)), int(r*0.1))
+    pygame.draw.circle(surf, eye, (int(cx+r*0.2), int(cy-r*0.05)), int(r*0.1))
+
+def icon_bats(surf, cx, cy, r):
+    col=(25,25,40)
+    def bat(x,y,s=1.0):
+        wing=[(x-30*s,y),(x-18*s,y-8*s),(x-6*s,y),(x+6*s,y),(x+18*s,y-8*s),(x+30*s,y)]
+        pygame.draw.lines(surf, col, False, [(int(a),int(b)) for a,b in wing], max(1,int(3*s)))
+        pygame.draw.circle(surf, col, (int(x),int(y)), int(6*s))
+        pygame.draw.polygon(surf, col, [(int(x-5*s),int(y-6*s)),(int(x),int(y-14*s)),(int(x+5*s),int(y-6*s))])
+    bat(cx-r*0.1, cy-r*0.02, r*0.08); bat(cx+r*0.2, cy+r*0.06, r*0.06)
+
+def icon_web(surf, cx, cy, r):
+    color=(235,235,250); rad=int(r*0.8)
+    for k in range(1,6):
+        pygame.draw.circle(surf, color, (int(cx),int(cy)), int(rad*k/6), 1)
+    for i in range(8):
+        a=2*math.pi*i/8; x=cx+rad*math.cos(a); y=cy+rad*math.sin(a)
+        pygame.draw.aaline(surf, color, (int(cx),int(cy)), (int(x),int(y)))
+
+ICON_DRAWERS = {
+    "candies": icon_candies,  # Dulce
+    "pumpkin": icon_pumpkin,  # Dulce
+    "potion":  icon_potion,   # Dulce (rosa)
+    "ghost":   icon_ghost,    # Truco
+    "bats":    icon_bats,     # Truco
+    "web":     icon_web,      # Truco
+}
+
+# Mapeo iconos en sentido horario (arranca a la derecha)
+ICONS_ORDER = ["candies","ghost","pumpkin","bats","potion","web"]
+
+# ===== Entrada =====
 class InputManager:
     def __init__(self, use_gpio=True, pin=17, debounce_ms=200):
         self.use_gpio = use_gpio
         self.pin = pin
-        self.debounce_s = debounce_ms / 1000.0
+        self.debounce_s = debounce_ms/1000.0
         self.last = 0.0
         if self.use_gpio:
             try:
@@ -84,159 +169,170 @@ class InputManager:
         now = time.time()
         if self.use_gpio:
             if GPIO.input(self.pin) == 0 and (now - self.last) > self.debounce_s:
-                self.last = now
-                time.sleep(0.02)
-                return True
+                self.last = now; time.sleep(0.02); return True
         else:
             keys = pygame.key.get_pressed()
             if keys[pygame.K_SPACE] and (now - self.last) > self.debounce_s:
-                self.last = now
-                return True
+                self.last = now; return True
         return False
 
     def cleanup(self):
-        if self.use_gpio:
-            GPIO.cleanup()
+        if self.use_gpio: GPIO.cleanup()
 
-# --------------- Juego ------------------
-class WheelGame:
+# ===== Wheel =====
+class PatternWheel:
     def __init__(self, screen):
         self.screen = screen
         self.dw, self.dh = self.screen.get_size()
-        self.center = (self.dw // 2, self.dh // 2)
+        self.buf = pygame.Surface((self.dw*SS, self.dh*SS)).convert()
+        self.cx, self.cy = self.buf.get_width()//2, self.buf.get_height()//2
+        self.radius = int(min(self.cx, self.cy) * 0.78)
+        self.r_inner = int(self.radius * 0.22)
+        self.r_outer = self.radius
+        self.per = 2*math.pi / N_SEG
+        self.mids = [(i+0.5)*self.per for i in range(N_SEG)]
 
-        # Fondo
-        self.bg = load_image_scaled(BACKGROUND_PATH, self.dw, self.dh, convert_alpha=False)
+        self.font_label  = pygame.font.SysFont("Arial", int(32*SS), bold=True)
+        self.font_result = pygame.font.SysFont("Arial", int(72*SS), bold=True)
+        self.font_hint   = pygame.font.SysFont("Arial", int(22*SS))
 
-        # Ruleta
-        wheel_target = int(min(self.dw, self.dh) * WHEEL_SCALE)
-        self.wheel_base = load_image_scaled(WHEEL_PATH, wheel_target, wheel_target)
-        self.wheel_base = circular_mask(self.wheel_base)  # por si la imagen trae puntero
+        self.bg = load_bg_scaled(self.buf.get_width(), self.buf.get_height())
 
-        self.wheel_angle = 0.0  # en radianes
-        self.font_result = pygame.font.SysFont("Arial", 64, bold=True)
-        self.font_hint   = pygame.font.SysFont("Arial", 24)
+        self.angle=0.0; self.is_spinning=False
+        self.spin_start_time=0.0; self.spin_duration=0.0
+        self.spin_start_angle=0.0; self.spin_total_delta=0.0
+        self.last_result=None; self.result_until=0.0
 
-        self.last_result = None
-        self.result_until = 0.0
+    def _shadow_under_wheel(self):
+        rx = int(self.r_outer * 0.95); ry = int(self.r_outer * 0.22)
+        base = pygame.Surface((rx*2, ry*2), pygame.SRCALPHA)
+        for i in range(14, 0, -1):
+            alpha = int(8 + i*4)
+            pygame.draw.ellipse(base, (0,0,0,alpha), (i*2, i, rx*2 - i*4, ry*2 - i*2))
+        self.buf.blit(base, base.get_rect(center=(self.cx, int(self.cy + self.r_outer*0.82))))
 
-    def draw_pointer(self):
-        cx, cy = self.center
-        r = self.wheel_base.get_width() // 2
-        tip = (cx, cy - r - 18)
-        base_y = cy - r + 44
-        left = (cx - int(r * 0.10), base_y)
-        right = (cx + int(r * 0.10), base_y)
-        pygame.gfxdraw.filled_polygon(self.screen, [tip, left, right], (225, 40, 30))
-        pygame.gfxdraw.aapolygon(self.screen, [tip, left, right], (90, 0, 0))
-
-    def draw_center_hub(self):
-        cx, cy = self.center
-        r = self.wheel_base.get_width() // 2
-        hub_r = int(r * 0.2)
-        pygame.gfxdraw.filled_circle(self.screen, cx, cy, int(hub_r*1.3), (12,12,14))
-        pygame.gfxdraw.filled_circle(self.screen, cx, cy, hub_r, (248,248,248))
-        pygame.gfxdraw.filled_circle(self.screen, cx - int(hub_r*0.45), cy - int(hub_r*0.15), int(hub_r*0.25), (35,35,45))
-        pygame.gfxdraw.filled_circle(self.screen, cx + int(hub_r*0.45), cy - int(hub_r*0.15), int(hub_r*0.25), (35,35,45))
+    def _center_dark_hub(self):
+        # Centro oscuro limpio (sin blanco)
+        hub_r = int(self.r_outer*0.22)
+        ring_r = int(self.r_outer*0.28)
+        # aro metálico oscuro
+        pygame.draw.circle(self.buf, (18,18,22), (self.cx, self.cy), ring_r)
+        for i in range(10):
+            pygame.draw.circle(self.buf, (40+6*i,40+6*i,50+7*i), (self.cx, self.cy), ring_r-i, 1)
+        pygame.draw.circle(self.buf, (10,10,12), (self.cx, self.cy), hub_r)
 
     def draw(self):
-        # fondo
-        self.screen.blit(self.bg, (0, 0))
-        # ruleta rotada (rotozoom usa grados)
-        angle_deg = -math.degrees(self.wheel_angle)   # signo negativo: sentido horario visual
-        rotated = pygame.transform.rotozoom(self.wheel_base, angle_deg, 1.0)
-        rect = rotated.get_rect(center=self.center)
-        self.screen.blit(rotated, rect)
+        self.buf.blit(self.bg, (0,0))
+        self._shadow_under_wheel()
 
-        # puntero fijo y centro
-        self.draw_pointer()
-        self.draw_center_hub()
+        # segmentos + bordes
+        for i in range(N_SEG):
+            a0 = i*self.per + self.angle
+            a1 = (i+1)*self.per + self.angle
+            poly = wedge_polygon(self.cx, self.cy, self.r_inner, self.r_outer, a0, a1, steps=80)
+            pygame.draw.polygon(self.buf, SEG_COLORS[i], [(int(x),int(y)) for x,y in poly])
+            pygame.draw.polygon(self.buf, (20,20,28), [(int(x),int(y)) for x,y in poly], 1)
 
-        # mensaje de resultado temporal
+        # separadores finos
+        for i in range(N_SEG):
+            a = i*self.per + self.angle
+            x0 = self.cx + self.r_inner*math.cos(a); y0 = self.cy + self.r_inner*math.sin(a)
+            x1 = self.cx + self.r_outer*math.cos(a); y1 = self.cy + self.r_outer*math.sin(a)
+            pygame.draw.aaline(self.buf, (10,10,16), (x0,y0), (x1,y1))
+
+        # iconos + textos
+        for i in range(N_SEG):
+            mid = self.mids[i] + self.angle
+            # icono
+            ix = self.cx + (self.r_inner + (self.r_outer-self.r_inner)*0.60)*math.cos(mid)
+            iy = self.cy + (self.r_inner + (self.r_outer-self.r_inner)*0.60)*math.sin(mid)
+            ICON_DRAWERS[ICONS_ORDER[i]](self.buf, ix, iy, int(self.r_outer*0.16))
+            # texto
+            tx = self.cx + (self.r_inner + (self.r_outer-self.r_inner)*0.36)*math.cos(mid)
+            ty = self.cy + (self.r_inner + (self.r_outer-self.r_inner)*0.36)*math.sin(mid)
+            lbl = SEGMENT_LABELS[i]
+            s1 = self.font_label.render(lbl, True, UI_SHADOW)
+            s2 = self.font_label.render(lbl, True, TEXT)
+            self.buf.blit(s1, s1.get_rect(center=(tx+2*SS, ty+2*SS)))
+            self.buf.blit(s2, s2.get_rect(center=(tx, ty)))
+
+        # centro oscuro
+        self._center_dark_hub()
+
+        # resultado temporal
         if self.last_result and time.time() < self.result_until:
-            txt = self.font_result.render(f"Resultado: {self.last_result}", True, TEXT_COLOR)
-            self.screen.blit(txt, txt.get_rect(midtop=(self.dw//2, 30)))
+            s1 = self.font_result.render(f"Resultado: {self.last_result}", True, UI_SHADOW)
+            s2 = self.font_result.render(f"Resultado: {self.last_result}", True, TEXT)
+            self.buf.blit(s1, s1.get_rect(center=(self.cx+3*SS, 70*SS+3*SS)))
+            self.buf.blit(s2, s2.get_rect(center=(self.cx, 70*SS)))
 
-    def spin_to_random(self, duration):
-        # Elegimos un objetivo al azar (por pesos iguales)
-        target_index = random.randrange(N_SEG)
-        self.spin_to_index(target_index, duration)
+        # salida
+        scaled = pygame.transform.smoothscale(self.buf, (self.dw, self.dh))
+        self.screen.blit(scaled, (0,0))
 
-    def spin_to_index(self, target_index, duration):
-        start = self.wheel_angle % (2 * math.pi)
-        pointer_world = -math.pi / 2  # el puntero está arriba
-        target_mid = target_index * SEG_PER_RAD + SEG_PER_RAD / 2
+    # animación
+    def start_spin_to_index(self, idx, duration):
+        self.is_spinning = True
+        self.spin_start_time = time.time()
+        self.spin_duration = max(0.5, float(duration))
+        self.spin_start_angle = self.angle % (2*math.pi)
+        pointer_world = -math.pi / 2  # referencia arriba
+        target_mid = idx * self.per + self.per/2
         base_delta = pointer_world - target_mid
         extra = random.uniform(SPIN_MIN_TURNS, SPIN_MAX_TURNS) * 2 * math.pi
-        total = base_delta + extra
+        self.spin_total_delta = base_delta + extra
 
-        t0 = time.time()
-        clock = pygame.time.Clock()
-        while True:
-            t = min(1.0, (time.time() - t0) / duration)
-            eased = ease_out_cubic(t)
-            self.wheel_angle = start + total * eased
-
-            self.draw()
-            pygame.display.flip()
-            clock.tick(FPS)
-            if t >= 1.0:
-                break
-
-        self.wheel_angle = start + total
-        # Determinar resultado:
-        idx = self.index_under_pointer()
-        self.last_result = SEGMENT_LABELS[idx]
-        self.result_until = time.time() + 2.2
+    def update(self):
+        if not getattr(self, "is_spinning", False): return
+        t = (time.time() - self.spin_start_time) / self.spin_duration
+        t = clamp(t, 0.0, 1.0)
+        self.angle = self.spin_start_angle + self.spin_total_delta * ease_out_cubic(t)
+        if t >= 1.0:
+            self.is_spinning = False
+            idx = self.index_under_pointer()
+            self.last_result = SEGMENT_LABELS[idx]
+            self.result_until = time.time() + 2.0
 
     def index_under_pointer(self):
-        # Ángulo arriba es -pi/2. El “ángulo del mundo” del segmento arriba:
-        world = (-math.pi / 2) - self.wheel_angle
+        world = (-math.pi / 2) - self.angle
         world %= (2 * math.pi)
-        return int(world // SEG_PER_RAD)
+        return int(world // (2*math.pi / N_SEG))
 
-# --------------- Main -------------------
+# ===== Main =====
 def main():
     pygame.init()
     flags = pygame.FULLSCREEN if FULLSCREEN else 0
     screen = pygame.display.set_mode((0, 0), flags)
-    pygame.display.set_caption("Ruleta Halloween (imagen que gira)")
+    pygame.display.set_caption("Ruleta Halloween – v4 Patrones")
 
-    game = WheelGame(screen)
-    inputs = InputManager(use_gpio=USE_GPIO, pin=BUTTON_GPIO, debounce_ms=DEBOUNCE_MS)
-
+    wheel = PatternWheel(screen)
     hint_font = pygame.font.SysFont("Arial", 24)
-    running = True
-    can_spin = True
+    inputs = InputManager(use_gpio=USE_GPIO, pin=BUTTON_GPIO, debounce_ms=DEBOUNCE_MS)
     clock = pygame.time.Clock()
 
-    try:
-        while running:
-            for e in pygame.event.get():
-                if e.type == pygame.QUIT:
-                    running = False
-                elif e.type == pygame.KEYDOWN and e.key == pygame.K_ESCAPE:
-                    running = False
+    running = True
+    while running:
+        for e in pygame.event.get():
+            if e.type == pygame.QUIT: running = False
+            elif e.type == pygame.KEYDOWN and e.key == pygame.K_ESCAPE: running = False
 
-            if can_spin and inputs.pressed():
-                can_spin = False
-                game.spin_to_random(SPIN_DURATION)
-                pygame.time.delay(160)
-                can_spin = True
+        if not getattr(wheel, "is_spinning", False) and inputs.pressed():
+            wheel.start_spin_to_index(random.randrange(N_SEG), SPIN_DURATION)
 
-            game.draw()
+        wheel.update()
+        wheel.draw()
 
-            # hint (útil en PC)
-            W, H = screen.get_size()
-            hint = "ESPACIO para girar (PC)  •  ESC para salir" if not USE_GPIO else "¡Apretá el botón para girar!  •  ESC para salir"
-            s = hint_font.render(hint, True, (245, 245, 245))
-            screen.blit(s, s.get_rect(midbottom=(W // 2, H - 14)))
+        # hint
+        W,H = screen.get_size()
+        hint = "ESPACIO para girar (PC)  •  ESC para salir" if not USE_GPIO else "¡Botón para girar!  •  ESC para salir"
+        s = hint_font.render(hint, True, (245,245,245))
+        screen.blit(s, s.get_rect(midbottom=(W//2, H-14)))
 
-            pygame.display.flip()
-            clock.tick(FPS)
-    finally:
-        inputs.cleanup()
-        pygame.quit()
+        pygame.display.flip()
+        clock.tick(FPS)
+
+    inputs.cleanup()
+    pygame.quit()
 
 if __name__ == "__main__":
     main()
