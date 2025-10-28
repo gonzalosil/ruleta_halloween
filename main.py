@@ -3,6 +3,7 @@ import math, pygame
 from config import *
 from wheel import Wheel
 
+
 def main():
     pygame.init()
     flags = pygame.FULLSCREEN if FULLSCREEN else 0
@@ -35,18 +36,14 @@ def main():
                 elif e.key == pygame.K_RIGHT:
                     wheel.adjust_image_offset(+math.radians(1))   # reconstruye capa
                 elif e.key == pygame.K_UP:
-                    wheel.adjust_pointer_offset(+math.radians(1))
+                    wheel.nudge(dy=-6)  # sube 6 px
                 elif e.key == pygame.K_DOWN:
-                    wheel.adjust_pointer_offset(-math.radians(1))
+                    wheel.nudge(dy=+6)  # baja 6 px
 
         wheel.update()
         wheel.draw()
 
-        # Hint inferior
-        font = pygame.font.SysFont("Arial", 22)
-        hint = "ESPACIO=Girar  •  C=Calibración  •  ←/→ imagen  •  ↑/↓ puntero  •  R=Reset  •  ESC=Salir"
-        text = font.render(hint, True, TEXT_COLOR)
-        screen.blit(text, text.get_rect(midbottom=(WIDTH//2, HEIGHT-10)))
+
 
         pygame.display.flip()
         clock.tick(FPS)

@@ -10,46 +10,67 @@ def _measure_text_angle(font, text, radius):
     total_px = sum(font.size(ch)[0] for ch in text)
     return total_px / max(1, radius)
 
+# ===== Texto curvo correcto (pantalla con eje Y hacia abajo) =====
+def _measure_text_angle(font, text, radius):
+    if not text:
+        return 0.0
+    total_px = sum(font.size(ch)[0] for ch in text)
+    return total_px / max(1, radius)
+
 def draw_arc_text(surf, text, font, center, radius, mid_angle, max_arc_angle,
                   color=(255,255,255), shadow=(20,20,20), shadow_offset=2):
     """
-    Dibuja `text` centrado en `mid_angle` siguiendo el arco de radio `radius`.
-    El texto ocupa como mucho `max_arc_angle` (rad). Cada letra se rota tangencialmente.
+    Dibuja `text` centrado en `mid_angle` siguiendo un arco de radio `radius`,
+    legible y sin espejo en ambos hemisferios.
     """
     if not text:
         return
+
     cx, cy = center
-    # ángulo “natural” que ocuparía el texto según su ancho
+
+    # cuánto arco ocuparía naturalmente el texto según su ancho y el radio
     natural_span = _measure_text_angle(font, text, radius)
-    span = min(natural_span, max_arc_angle * 0.9)  # deja margen al borde del segmento
-    start = mid_angle - span/2.0
+    span = min(natural_span, max_arc_angle * 0.90)
 
-    # recorre caracteres posicionándolos uno tras otro en el arco
+    left = (math.cos(mid_angle) < 0.0)  # hemisferio izquierdo de la rueda
+
+    if left:
+        # recorro el arco en sentido decreciente y REVERSO los caracteres
+        start = mid_angle + span / 2.0
+        step_sign = -1.0
+        chars = text[::-1]
+    else:
+        start = mid_angle - span / 2.0
+        step_sign = +1.0
+        chars = text
+
     angle = start
-    for ch in text:
+    for ch in chars:
         w, _ = font.size(ch)
-        step = w / max(1, radius)  # ángulo que ocupa esta letra
-        # ángulo central de la letra
-        a = angle + step/2.0
+        dtheta = (w / max(1, radius)) * step_sign
+        a = angle + dtheta / 2.0
 
-        # posición en el arco
+        # posición sobre el arco
         x = cx + radius * math.cos(a)
         y = cy + radius * math.sin(a)
 
-        # orientación tangencial (mirando hacia afuera)
-        ang_deg = math.degrees(a) + 90
+        # 🔧 Rotación correcta para coordenadas de pantalla (Y hacia abajo)
+        # 👉 tu hallazgo: usar -deg(a) - 90 evita el efecto "espejo"
+        ang_deg = -math.degrees(a) - 90.0
 
         # render + sombra
         glyph  = font.render(ch, True, color)
         gshade = font.render(ch, True, shadow)
-
         gshade = pygame.transform.rotozoom(gshade, ang_deg, 1.0)
         glyph  = pygame.transform.rotozoom(glyph,  ang_deg, 1.0)
 
         surf.blit(gshade, gshade.get_rect(center=(x+shadow_offset, y+shadow_offset)))
         surf.blit(glyph,  glyph.get_rect(center=(x, y)))
 
-        angle += step
+        angle += dtheta
+
+
+
 
 def ease_out_cubic(t: float) -> float:
     t -= 1.0
@@ -66,7 +87,7 @@ class Wheel:
         # Imagen de ruleta (PNG sin texto, transparente)
         self.wheel_img = pygame.image.load(WHEEL_IMAGE).convert_alpha()
         # Escala para dejar margen en 900x900
-        self.wheel_img = pygame.transform.smoothscale(self.wheel_img, (820, 820))
+        self.wheel_img = pygame.transform.smoothscale(self.wheel_img, (700, 700))
 
         # Geometría del texto sobre la rueda
         self.r_outer = 820 // 2
@@ -91,8 +112,13 @@ class Wheel:
         self.font_small  = pygame.font.SysFont("Arial", 22)
 
         # Offsets de calibración (mutables en vivo)
-        self.image_offset   = 0.0   # alinea textos con el PNG
+        self.image_offset   = 5.515   # alinea textos con el PNG
         self.pointer_offset = 0.0   # alinea cálculo de índice con el puntero
+
+        # Offset de posición (px) para mover rueda + textos juntos
+        self.off_x = 0
+        self.off_y = 0
+
 
         # Capa base con todos los textos ya colocados (sin rotación de rueda)
         self.labels_base = self._build_labels_surface()
@@ -100,27 +126,47 @@ class Wheel:
         # Overlay de calibración
         self.show_calib = False
 
-    # -------- construcción de la capa de textos (no depende de self.angle) -----
+    def nudge(self, dx=0, dy=0):
+        """Mueve la ruleta y las letras juntas."""
+        self.off_x += dx
+        self.off_y += dy
+
+    def draw_pointer(self):
+        """
+        Puntero negro con borde blanco, centrado arriba y con la punta
+        apoyada sobre la circunferencia de la ruleta.
+        """
+        cx = self.cx + self.off_x
+        cy = self.cy + self.off_y
+
+        # tamaño relativo (más grande)
+        base_height = int(self.r_outer * 0.18)
+        half_width = int(self.r_outer * 0.12)
+
+        # la punta se apoya sobre la circunferencia de la ruleta
+        tip_y = cy - self.r_outer + int(self.r_outer * 0.03 + 325)
+        base_y = tip_y - base_height
+
+        tip = (cx, tip_y)
+        left = (cx - half_width, base_y)
+        right = (cx + half_width, base_y)
+
+        pygame.draw.polygon(self.screen, (0, 0, 0), [tip, left, right])
+        pygame.draw.polygon(self.screen, (255, 255, 255), [tip, left, right], 3)
+
     def _build_labels_surface(self) -> pygame.Surface:
-        """Crea una superficie 820x820 transparente con los 7 textos curvados.
-        Usa image_offset para alinear con la gráfica del PNG."""
         surf = pygame.Surface((820, 820), pygame.SRCALPHA)
         cx, cy = 410, 410
-
-        # radio donde irán las letras (ya lo tenés calculado en __init__)
-        label_radius = self.label_r
-
-        # cada etiqueta se dibuja centrada en el ángulo del segmento
         for i in range(N_SEGMENTS):
-            mid = (i + 0.5) * SEGMENT_ANGLE + self.image_offset
+            mid = (i + 0.5) * SEGMENT_ANGLE + self.image_offset  # SOLO offset de imagen
             draw_arc_text(
                 surf,
                 SEGMENT_LABELS[i],
                 self.font_label,
                 center=(cx, cy),
-                radius=label_radius,
+                radius=self.label_r,
                 mid_angle=mid,
-                max_arc_angle=SEGMENT_ANGLE * 0.80,  # ocupá ~80% del segmento
+                max_arc_angle=SEGMENT_ANGLE * 0.80,
                 color=TEXT_COLOR,
                 shadow=UI_SHADOW,
                 shadow_offset=2
@@ -162,26 +208,34 @@ class Wheel:
         # Fondo
         self.screen.blit(self.bg, (0, 0))
 
-        # 1) Rueda
+        center = (self.cx + self.off_x, self.cy + self.off_y+200)
+
         wheel_rot = pygame.transform.rotozoom(self.wheel_img, math.degrees(self.angle), 1.0)
-        rect = wheel_rot.get_rect(center=(self.cx, self.cy))
-        self.screen.blit(wheel_rot, rect)
+        self.screen.blit(wheel_rot, wheel_rot.get_rect(center=center))
 
-        # 2) Capa de textos: se rota IGUAL que la rueda ⇒ siempre alineada
         labels_rot = pygame.transform.rotozoom(self.labels_base, math.degrees(self.angle), 1.0)
-        self.screen.blit(labels_rot, labels_rot.get_rect(center=(self.cx, self.cy)))
+        self.screen.blit(labels_rot, labels_rot.get_rect(center=center))
 
-        # 3) Resultado temporal
-        if self.result and time.time() < self.result_until:
-            s1 = self.font_result.render(f"Resultado: {self.result}", True, UI_SHADOW)
-            s2 = self.font_result.render(f"Resultado: {self.result}", True, TEXT_COLOR)
-            self.screen.blit(s1, s1.get_rect(center=(self.cx+3, 80+3)))
-            self.screen.blit(s2, s2.get_rect(center=(self.cx, 80)))
+
 
         # 4) Overlay de calibración (opcional)
         if self.show_calib:
             self._draw_calibration_overlay()
+        self.draw_pointer()
+        # 3) Resultado con imagen (Dulce o Truco)
+        if self.result and time.time() < self.result_until:
+            if self.result.lower() == "dulce":
+                img = pygame.image.load("assets/dulce.png").convert_alpha()
+            else:
+                img = pygame.image.load("assets/truco.png").convert_alpha()
 
+            # Escala según el tamaño de pantalla (ajustá a gusto)
+            size = int(min(WIDTH, HEIGHT) * 0.5)
+            img = pygame.transform.smoothscale(img, (size, size))
+
+            # Dibujar centrada en la parte superior
+            rect = img.get_rect(center=(self.cx, self.cy))
+            self.screen.blit(img, rect)
     # ---------- Calibración ----------
     def adjust_image_offset(self, delta_rad: float):
         self.image_offset = (self.image_offset + delta_rad) % (2*math.pi)
