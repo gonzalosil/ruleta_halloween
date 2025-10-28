@@ -2,8 +2,8 @@
 import math
 
 # --- Pantalla (cuadrada) ---
-WIDTH  = 1200
-HEIGHT = 1200
+WIDTH  = 900
+HEIGHT = 900
 FPS = 60
 FULLSCREEN = False
 

@@ -87,10 +87,10 @@ class Wheel:
         # Imagen de ruleta (PNG sin texto, transparente)
         self.wheel_img = pygame.image.load(WHEEL_IMAGE).convert_alpha()
         # Escala para dejar margen en 900x900
-        self.wheel_img = pygame.transform.smoothscale(self.wheel_img, (700, 700))
+        self.wheel_img = pygame.transform.smoothscale(self.wheel_img, (500, 500))
 
         # Geometría del texto sobre la rueda
-        self.r_outer = 820 // 2
+        self.r_outer = 500 // 2
         self.r_inner = int(self.r_outer * 0.22)
         self.label_r = int(self.r_inner + (self.r_outer - self.r_inner) * 0.60)
 
