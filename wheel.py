@@ -87,7 +87,7 @@ class Wheel:
         # Imagen de ruleta (PNG sin texto, transparente)
         self.wheel_img = pygame.image.load(WHEEL_IMAGE).convert_alpha()
         # Escala para dejar margen en 900x900
-        self.wheel_img = pygame.transform.smoothscale(self.wheel_img, (500, 500))
+        self.wheel_img = pygame.transform.smoothscale(self.wheel_img, (700, 700))
         # Img dulce y truco
         self.truco = pygame.image.load("assets/truco.png").convert_alpha()
         self.dulce = pygame.image.load("assets/dulce.png").convert_alpha()
@@ -146,7 +146,7 @@ class Wheel:
         half_width = int(self.r_outer * 0.12)
 
         # la punta se apoya sobre la circunferencia de la ruleta
-        tip_y = cy - self.r_outer + int(self.r_outer * 0.03 + 325)
+        tip_y = cy - self.r_outer + int(self.r_outer * 0.03 + 150)
         base_y = tip_y - base_height
 
         tip = (cx, tip_y)

@@ -2,10 +2,10 @@
 import math
 
 # --- Pantalla (cuadrada) ---
-WIDTH  = 900
-HEIGHT = 900
+WIDTH  = 1200
+HEIGHT = 1200
 FPS = 60
-FULLSCREEN = False
+FULLSCREEN = True
 
 # --- Archivos ---
 ASSET_DIR = "assets"
