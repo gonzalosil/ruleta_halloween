@@ -8,7 +8,7 @@ def main():
     pygame.init()
     flags = pygame.FULLSCREEN if FULLSCREEN else 0
     screen = pygame.display.set_mode((WIDTH, HEIGHT), flags)
-    pygame.display.set_caption("Ruleta Halloween – 7 segmentos")
+    pygame.display.set_caption("Ruleta Halloween – 8 segmentos")
 
     clock = pygame.time.Clock()
     wheel = Wheel(screen)

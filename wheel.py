@@ -88,7 +88,9 @@ class Wheel:
         self.wheel_img = pygame.image.load(WHEEL_IMAGE).convert_alpha()
         # Escala para dejar margen en 900x900
         self.wheel_img = pygame.transform.smoothscale(self.wheel_img, (500, 500))
-
+        # Img dulce y truco
+        self.truco = pygame.image.load("assets/truco.png").convert_alpha()
+        self.dulce = pygame.image.load("assets/dulce.png").convert_alpha()
         # Geometría del texto sobre la rueda
         self.r_outer = 500 // 2
         self.r_inner = int(self.r_outer * 0.22)
@@ -225,9 +227,9 @@ class Wheel:
         # 3) Resultado con imagen (Dulce o Truco)
         if self.result and time.time() < self.result_until:
             if self.result.lower() == "dulce":
-                img = pygame.image.load("assets/dulce.png").convert_alpha()
+                img = self.dulce
             else:
-                img = pygame.image.load("assets/truco.png").convert_alpha()
+                img = self.truco
 
             # Escala según el tamaño de pantalla (ajustá a gusto)
             size = int(min(WIDTH, HEIGHT) * 0.5)
