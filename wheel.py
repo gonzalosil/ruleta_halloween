@@ -87,7 +87,7 @@ class Wheel:
         # Imagen de ruleta (PNG sin texto, transparente)
         self.wheel_img = pygame.image.load(WHEEL_IMAGE).convert_alpha()
         # Escala para dejar margen en 900x900
-        self.wheel_img = pygame.transform.smoothscale(self.wheel_img, (700, 700))
+        self.wheel_img = pygame.transform.smoothscale(self.wheel_img, (450, 450))
         # Img dulce y truco
         self.truco = pygame.image.load("assets/truco.png").convert_alpha()
         self.dulce = pygame.image.load("assets/dulce.png").convert_alpha()
@@ -109,7 +109,7 @@ class Wheel:
         self.result_until = 0.0
 
         # Tipografías
-        self.font_label  = pygame.font.SysFont("Arial", 42, bold=True)
+        self.font_label  = pygame.font.SysFont("Arial",30 , bold=True)
         self.font_result = pygame.font.SysFont("Arial", 64, bold=True)
         self.font_small  = pygame.font.SysFont("Arial", 22)
 
@@ -146,7 +146,7 @@ class Wheel:
         half_width = int(self.r_outer * 0.12)
 
         # la punta se apoya sobre la circunferencia de la ruleta
-        tip_y = cy - self.r_outer + int(self.r_outer * 0.03 + 150)
+        tip_y = cy - self.r_outer + int(self.r_outer * 0.03 + 190)
         base_y = tip_y - base_height
 
         tip = (cx, tip_y)
@@ -210,7 +210,7 @@ class Wheel:
         # Fondo
         self.screen.blit(self.bg, (0, 0))
 
-        center = (self.cx + self.off_x, self.cy + self.off_y+200)
+        center = (self.cx + self.off_x, self.cy + self.off_y+125)
 
         wheel_rot = pygame.transform.rotozoom(self.wheel_img, math.degrees(self.angle), 1.0)
         self.screen.blit(wheel_rot, wheel_rot.get_rect(center=center))
