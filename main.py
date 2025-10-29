@@ -5,7 +5,6 @@ from wheel import Wheel
 import serial
 from serial.tools import list_ports
 
-
 # ------- GPIO opcional (solo en Raspberry Pi) -------
 HAVE_GPIO = False
 BUTTON_PIN = 17  # GPIO17 (pin físico 11). Botón al GND.
