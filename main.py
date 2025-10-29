@@ -2,6 +2,9 @@
 import math, time, pygame
 from config import *
 from wheel import Wheel
+import serial
+from serial.tools import list_ports
+
 
 # ------- GPIO opcional (solo en Raspberry Pi) -------
 HAVE_GPIO = False
@@ -25,11 +28,33 @@ def cleanup_gpio():
     if HAVE_GPIO:
         GPIO.cleanup()
 
+def open_arduino_serial(baud=115200):
+    # Intento auto: busca puertos con "Arduino" en descripción
+    for p in list_ports.comports():
+        desc = (p.description or "").lower()
+        if "arduino" in desc or "mega" in desc or "ch340" in desc:
+            try:
+                ser = serial.Serial(p.device, baudrate=baud, timeout=0.0)
+                ser.reset_input_buffer()
+                return ser
+            except Exception:
+                pass
+    # Fallback: ajustá a mano si hace falta, ej: "COM3" en Windows, "/dev/ttyACM0" en Linux, "/dev/cu.usbmodemXXXX" en macOS
+    try:
+        return serial.Serial("COM3", baudrate=baud, timeout=0.0)  # cambia si no es COM3
+    except Exception:
+        return None
 
 def main():
     pygame.init()
-    flags = pygame.FULLSCREEN if FULLSCREEN else 0
-    screen = pygame.display.set_mode((WIDTH, HEIGHT), flags)
+
+    flags = 0
+    if FULLSCREEN:
+        flags |= pygame.FULLSCREEN
+    # Más suave en PC
+    flags |= pygame.SCALED | pygame.DOUBLEBUF
+    screen = pygame.display.set_mode((WIDTH, HEIGHT), flags, vsync=1)
+
     pygame.display.set_caption("Ruleta Halloween – 8 segmentos")
 
     setup_gpio()
@@ -41,6 +66,9 @@ def main():
     # Debounce para botón físico
     last_press_ts = 0.0
     DEBOUNCE_S = 0.25
+
+    ser = open_arduino_serial()
+
 
     try:
         while running:
@@ -69,6 +97,18 @@ def main():
                     elif e.key == pygame.K_DOWN:
                         wheel.nudge(dy=+6)  # baja 6 px
 
+            # --- Botón externo por Arduino Mega (Serial) ---
+            if ser and ser.in_waiting:
+                try:
+                    line = ser.readline().decode(errors="ignore").strip()
+                except Exception:
+                    line = ""
+                if line == "1":
+                    now = time.time()
+                    if (now - last_press_ts) > DEBOUNCE_S and not wheel.is_spinning:
+                        wheel.start_spin()
+                        last_press_ts = now
+
             # --- Botón físico (solo en Pi) ---
             if HAVE_GPIO:
                 if GPIO.input(BUTTON_PIN) == GPIO.LOW:  # presionado (a GND)
@@ -88,6 +128,11 @@ def main():
     finally:
         cleanup_gpio()
         pygame.quit()
+        if ser:
+            try:
+                ser.close()
+            except:
+                pass
 
 
 if __name__ == "__main__":
